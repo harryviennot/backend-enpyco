@@ -1,0 +1,208 @@
+// Prisma Schema for Memoires Techniques
+// This is the minimal schema to get started
+
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
+  extensions = [vector]
+}
+
+// User Model
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  name         String?
+  passwordHash String
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  projects     Project[]
+
+  @@map("users")
+}
+
+// Project Model
+model Project {
+  id               String         @id @default(uuid())
+  name             String
+  client           String?
+  description      String?
+  status           ProjectStatus  @default(DRAFT)
+  rcFileUrl        String?
+  rcCriteria       String[]
+  selectedMemoires String[]
+  sectionsConfig   Json?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  userId           String
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  documents        Document[]
+  sections         Section[]
+
+  @@map("projects")
+}
+
+enum ProjectStatus {
+  DRAFT
+  GENERATING
+  READY
+  FINAL
+  ARCHIVED
+}
+
+// Document Model
+model Document {
+  id          String         @id @default(uuid())
+  projectId   String
+  type        DocumentType
+  fileUrl     String
+  fileName    String
+  fileSize    Int
+  status      ParseStatus    @default(PENDING)
+  metadata    Json?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  project     Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("documents")
+}
+
+enum DocumentType {
+  RC
+  PLANNING
+  PIC
+  ORGANIGRAMME
+  PHOTO
+  AUTRE
+}
+
+enum ParseStatus {
+  PENDING
+  PARSING
+  DONE
+  FAILED
+}
+
+// Reference Memoires Model
+model ReferenceMemoire {
+  id           String    @id @default(uuid())
+  name         String
+  client       String?
+  year         Int?
+  projectType  String?
+  location     String?
+  montant      Float?
+  fileUrl      String
+  indexed      Boolean   @default(false)
+  chunkCount   Int       @default(0)
+  metadata     Json?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  chunks       DocumentChunk[]
+
+  @@map("reference_memoires")
+}
+
+// Document Chunks for RAG (pgvector)
+model DocumentChunk {
+  id              String            @id @default(uuid())
+  memoireId       String
+  content         String
+  embedding       Unsupported("vector(1536)")?
+  metadata        Json?
+  chunkIndex      Int
+  createdAt       DateTime          @default(now())
+
+  memoire         ReferenceMemoire  @relation(fields: [memoireId], references: [id], onDelete: Cascade)
+
+  @@map("document_chunks")
+  @@index([memoireId])
+}
+
+// Section Model (generated content)
+model Section {
+  id              String        @id @default(uuid())
+  projectId       String
+  type            String
+  title           String
+  content         String
+  images          String[]
+  version         Int           @default(1)
+  status          SectionStatus @default(DRAFT)
+  tokensUsed      Int?
+  generationTime  Float?
+  context         Json?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  validatedAt     DateTime?
+
+  project         Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("sections")
+}
+
+enum SectionStatus {
+  DRAFT
+  GENERATING
+  GENERATED
+  VALIDATED
+  FAILED
+}
+
+// Content Blocks (reusable templates)
+model Block {
+  id          String    @id @default(uuid())
+  type        String
+  title       String
+  content     String
+  images      String[]
+  category    String?
+  tags        String[]
+  isTemplate  Boolean   @default(false)
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("blocks")
+}
+
+// Templates
+model Template {
+  id          String    @id @default(uuid())
+  name        String
+  type        String
+  version     String    @default("1.0")
+  isDefault   Boolean   @default(false)
+  fileUrl     String
+  thumbnailUrl String?
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("templates")
+}
+
+// Assets (images, logos, etc.)
+model Asset {
+  id          String    @id @default(uuid())
+  type        String
+  category    String?
+  title       String
+  fileUrl     String
+  tags        String[]
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("assets")
+}
