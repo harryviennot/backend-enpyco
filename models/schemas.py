@@ -121,6 +121,41 @@ class SectionData(BaseModel):
     created_at: datetime
 
 
+# === RAG Schemas ===
+
+class IndexResponse(BaseModel):
+    """Response after indexing a memoire."""
+    memoire_id: str
+    status: str
+    chunks_indexed: int
+    embeddings_generated: int
+    message: str
+
+
+class SearchRequest(BaseModel):
+    """Request to search for similar content."""
+    query: str = Field(..., min_length=1)
+    memoire_ids: Optional[List[str]] = None
+    n_results: int = Field(default=10, ge=1, le=100)
+    similarity_threshold: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class SearchResult(BaseModel):
+    """A single search result."""
+    id: str
+    content: str
+    metadata: Dict[str, Any]
+    similarity: float
+    memoire_id: str
+
+
+class SearchResponse(BaseModel):
+    """Response from a search query."""
+    query: str
+    results: List[SearchResult]
+    count: int
+
+
 # === Health Check ===
 
 class HealthResponse(BaseModel):

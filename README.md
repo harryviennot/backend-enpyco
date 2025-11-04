@@ -18,9 +18,14 @@ backend/
 ├── venv/                      # Python virtual environment
 ├── services/
 │   ├── __init__.py
-│   └── supabase.py           # Supabase client & DB operations
-├── models/                    # Pydantic schemas (future)
-├── utils/                     # Helper functions (future)
+│   ├── supabase.py           # Supabase client & DB operations
+│   └── parser.py             # PDF/DOCX parsing & text chunking
+├── models/
+│   ├── __init__.py
+│   └── schemas.py            # Pydantic models for API validation
+├── utils/
+│   ├── __init__.py
+│   └── helpers.py            # File validation utilities
 ├── templates/                 # Word templates (future)
 ├── data/                      # Generated output files
 ├── main.py                   # FastAPI application
@@ -67,26 +72,31 @@ OPENAI_API_KEY="sk-..."
 ### Option 1: Docker (Recommended)
 
 **Start all services:**
+
 ```bash
 docker-compose up
 ```
 
 **Start in background:**
+
 ```bash
 docker-compose up -d
 ```
 
 **View logs:**
+
 ```bash
 docker-compose logs -f backend
 ```
 
 **Stop services:**
+
 ```bash
 docker-compose down
 ```
 
 **Rebuild after code changes:**
+
 ```bash
 docker-compose up --build
 ```
@@ -96,27 +106,44 @@ The API will be available at `http://localhost:8000`
 ### Option 2: Local Development (without Docker)
 
 **Development Mode (with auto-reload):**
+
 ```bash
 source venv/bin/activate
 python main.py
 ```
 
 Or using uvicorn directly:
+
 ```bash
 uvicorn main:app --reload --port 8000
 ```
 
 **Production Mode:**
+
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 ## API Endpoints
 
-### Current (Step 1)
+### System
 
 - `GET /` - API information
-- `GET /health` - Health check
+- `GET /health` - Health check (database + storage)
+
+### Memoires
+
+- `POST /memoires/upload` - Upload PDF/DOCX (auto-parses and chunks)
+- `GET /memoires` - List all uploaded memoires
+- `GET /memoires/{id}` - Get memoire details
+- `GET /memoires/{id}/chunks` - Get all chunks for a memoire
+- `POST /memoires/{id}/parse` - Re-parse and chunk document
+- `POST /memoires/{id}/index` - Generate embeddings and index for RAG
+- `DELETE /memoires/{id}` - Delete memoire and all associated data
+
+### RAG (Search)
+
+- `POST /search` - Semantic search across indexed memoires
 
 ### Documentation
 
@@ -125,9 +152,6 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 ### Planned (Future Steps)
 
-- `POST /memoires/upload` - Upload reference memoir (PDF/DOCX)
-- `POST /memoires/{id}/index` - Index memoir for RAG
-- `GET /memoires` - List all memoirs
 - `POST /projects` - Create new project
 - `POST /projects/{id}/upload-rc` - Upload RC document
 - `POST /projects/{id}/generate` - Generate memoir sections
@@ -137,54 +161,201 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 ## Current Status
 
 ✅ **Step 1 Complete**: Initial Setup
+
 - FastAPI server running
 - Supabase connection working
 - All API keys validated
 - Latest packages installed
 
 ✅ **Step 2 Complete**: Database Schema Setup
+
 - All tables created (memoires, projects, sections, document_chunks)
 - pgvector extension enabled
 - Vector similarity index created (IVFFlat)
 - match_documents() PostgreSQL function created
 
+✅ **Step 3 Complete**: Parser Service
+
+- PDF parsing with pypdf
+- DOCX parsing with python-docx
+- Text chunking with sliding window (500 chars, 100 overlap)
+- File upload with validation (50MB limit - Supabase free tier)
+- Automatic parsing and chunking on upload
+- Manual re-parse functionality
+- Chunks stored in database (without embeddings)
+
+✅ **Step 4 Complete**: RAG Service (Indexing & Search)
+
+- OpenAI embeddings generation (text-embedding-3-small)
+- Batch embedding processing for efficiency
+- Embedding storage in pgvector
+- Semantic search with similarity scoring
+- Filter search by specific memoires
+- Configurable result count and similarity threshold
+
 ### What's Working
 
 - ✅ FastAPI server with health check
-- ✅ Supabase client initialization
+- ✅ Supabase client initialization and storage
 - ✅ Configuration management
-- ✅ All dependencies installed and up-to-date
 - ✅ Database schema with vector search capability
 - ✅ PostgreSQL functions for RAG operations
 - ✅ Docker & Docker Compose setup
-- ✅ Redis for caching on port 6380 (optional)
+- ✅ **PDF/DOCX upload and parsing**
+- ✅ **Automatic text chunking on upload**
+- ✅ **Chunk storage and retrieval**
+- ✅ **Delete memoires with CASCADE cleanup**
+- ✅ **Basic frontend test interface**
+- ✅ **OpenAI embeddings generation**
+- ✅ **Vector indexing in pgvector**
+- ✅ **Semantic search with similarity scoring**
 
 ### Next Steps
 
-1. **Step 3**: Parser Service
-   - PDF parsing (pypdf)
-   - DOCX parsing (python-docx)
-   - Text chunking for RAG
+1. **Step 5**: Generator Service
 
-3. **Step 4**: RAG Service
-   - OpenAI embeddings generation
-   - Vector storage in pgvector
-   - Semantic search
+   - Claude API integration for memoir generation
+   - Section generation with RAG context
+   - Prompt engineering for technical memoirs
 
-4. **Step 5**: Generator Service
-   - Claude API integration
-   - Section generation with context
-   - Prompt engineering
+3. **Step 6**: Exporter Service
 
-5. **Step 6**: Exporter Service
    - Word document generation
    - Template management
-   - Styling
+   - Styling and formatting
 
-6. **Step 7**: API Endpoints
-   - Implement all CRUD operations
-   - File upload handling
-   - Error handling
+4. **Step 7**: Projects & RC Processing
+   - Project management endpoints
+   - RC document upload and parsing
+   - Link projects to memoires
+
+## Usage Examples
+
+### Complete RAG Workflow
+
+Here's a complete example of uploading, indexing, and searching memoires:
+
+#### 1. Upload a Memoire
+
+```bash
+curl -X POST "http://localhost:8000/memoires/upload" \
+  -F "file=@memoire_toulouse.pdf" \
+  -F "client=Toulouse Metropole" \
+  -F "year=2024"
+```
+
+Response:
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "filename": "memoire_toulouse.pdf",
+  "storage_path": "memoires/1699564800_memoire_toulouse.pdf",
+  "client": "Toulouse Metropole",
+  "year": 2024,
+  "indexed": false,
+  "parsed": true,
+  "created_at": "2024-11-04T10:00:00Z"
+}
+```
+
+Note: The document is automatically parsed and chunked on upload!
+
+#### 2. Index the Memoire (Generate Embeddings)
+
+```bash
+curl -X POST "http://localhost:8000/memoires/550e8400-e29b-41d4-a716-446655440000/index"
+```
+
+Response:
+```json
+{
+  "memoire_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "indexed",
+  "chunks_indexed": 45,
+  "embeddings_generated": 45,
+  "message": "Successfully indexed 45 chunks"
+}
+```
+
+This process:
+- Generates embeddings using OpenAI's `text-embedding-3-small` (1536 dimensions)
+- Stores embeddings in pgvector
+- Marks the memoire as indexed
+
+#### 3. Search Across Memoires
+
+```bash
+curl -X POST "http://localhost:8000/search" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "organisation du chantier et moyens humains",
+    "n_results": 5,
+    "similarity_threshold": 0.7
+  }'
+```
+
+Response:
+```json
+{
+  "query": "organisation du chantier et moyens humains",
+  "results": [
+    {
+      "id": "chunk-123",
+      "content": "L'organisation du chantier sera assurée par...",
+      "metadata": {
+        "filename": "memoire_toulouse.pdf",
+        "client": "Toulouse Metropole",
+        "chunk_index": 12
+      },
+      "similarity": 0.89,
+      "memoire_id": "550e8400-e29b-41d4-a716-446655440000"
+    }
+  ],
+  "count": 5
+}
+```
+
+#### 4. Search Within Specific Memoires
+
+```bash
+curl -X POST "http://localhost:8000/search" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "sécurité et santé",
+    "memoire_ids": ["550e8400-e29b-41d4-a716-446655440000", "660e8400-e29b-41d4-a716-446655440001"],
+    "n_results": 10
+  }'
+```
+
+### List All Memoires
+
+```bash
+curl -X GET "http://localhost:8000/memoires"
+```
+
+### Get Memoire Details
+
+```bash
+curl -X GET "http://localhost:8000/memoires/550e8400-e29b-41d4-a716-446655440000"
+```
+
+### View Chunks
+
+```bash
+curl -X GET "http://localhost:8000/memoires/550e8400-e29b-41d4-a716-446655440000/chunks"
+```
+
+### Delete a Memoire
+
+```bash
+curl -X DELETE "http://localhost:8000/memoires/550e8400-e29b-41d4-a716-446655440000"
+```
+
+This deletes:
+- The file from Supabase Storage
+- The database record
+- All chunks (via CASCADE)
+- All embeddings (via CASCADE)
 
 ## Development Notes
 
@@ -197,6 +368,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 ### Database
 
 The app uses Supabase which provides:
+
 - PostgreSQL database
 - pgvector extension for vector similarity search
 - Storage (S3-compatible) for file uploads
@@ -207,6 +379,7 @@ The app uses Supabase which provides:
 ### Docker Issues
 
 **Port Already in Use:**
+
 ```bash
 # Stop all containers
 docker-compose down
@@ -216,6 +389,7 @@ lsof -ti:8000 | xargs kill -9
 ```
 
 **Container Won't Start:**
+
 ```bash
 # Check logs
 docker-compose logs backend
@@ -227,6 +401,7 @@ docker-compose up
 ```
 
 **Database Connection Issues:**
+
 ```bash
 # Check .env file has correct DATABASE_URL
 # Ensure Supabase project is active
@@ -237,12 +412,14 @@ docker-compose exec backend python -c "from config import Config; Config.validat
 ### Local Development Issues
 
 **Port Already in Use:**
+
 ```bash
 # Kill process on port 8000
 lsof -ti:8000 | xargs kill -9
 ```
 
 **Module Not Found:**
+
 ```bash
 # Reinstall dependencies
 pip install -r requirements.txt --upgrade
