@@ -158,10 +158,11 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 - `POST /projects/{id}/upload-rc` - Upload RC document
 - `POST /projects/{id}/generate` - Generate memoir sections
 - `GET /projects/{id}/sections` - Get generated sections
+- `DELETE /projects/{id}` - Delete project and all data
 
-### Planned (Future Steps)
+### Export (Step 6 Complete)
 
-- `GET /projects/{id}/download` - Download generated Word document
+- `GET /projects/{id}/download` - Download generated memoir as Word document (.docx)
 
 ## Current Status
 
@@ -225,6 +226,9 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 - ✅ **Intelligent section generation with RAG context**
 - ✅ **9 section types with specialized prompts**
 - ✅ **Real-time generation with progress tracking**
+- ✅ **Word document export with Bernadet styling**
+- ✅ **Markdown to Word conversion with tables and lists**
+- ✅ **Download endpoint for generated memoirs**
 
 ✅ **Step 5 Complete**: Generator Service
 
@@ -236,17 +240,18 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 - Real-time generation with progress tracking
 - Error handling with partial generation support
 
+✅ **Step 6 Complete**: Exporter Service
+
+- Word document generation from markdown sections
+- Bernadet styling (Arial fonts, blue/green headings)
+- Markdown to Word conversion (headings, paragraphs, lists, tables)
+- Automatic styling application (RGB colors, font sizes)
+- Download endpoint: GET /projects/{id}/download
+- Professional document formatting with page breaks
+
 ### Next Steps
 
-1. **Step 6**: Exporter Service
-
-   - Word document generation from sections
-   - Template management for Bernadet style
-   - Markdown to Word conversion
-   - Styling and formatting
-   - Download endpoint for generated memoirs
-
-2. **Step 7**: Advanced Features (Optional)
+1. **Step 7**: Advanced Features (Optional)
    - Section regeneration capability
    - Multiple memoir templates
    - RC criteria extraction enhancement
@@ -467,6 +472,30 @@ curl -X GET "http://localhost:8000/projects/4cf0ac0e-dbc9-46e7-bfb9-f8ad64c889e1
 ```
 
 This returns all generated sections with their full markdown content.
+
+#### 5. Download Generated Memoir as Word Document
+
+```bash
+curl -X GET "http://localhost:8000/projects/4cf0ac0e-dbc9-46e7-bfb9-f8ad64c889e1/download" \
+  --output memoire.docx
+```
+
+Response: Downloads a professionally formatted Word document (.docx) with:
+- Bernadet styling (Arial fonts, blue/green headings)
+- All sections converted from markdown to Word
+- Tables, lists, and proper formatting
+- Page breaks between sections
+- Professional document layout
+
+The downloaded file will be named `memoire_{project_name}.docx`.
+
+**Document Styling:**
+- Title: Heading 0 - Arial
+- Section Headings: Heading 1 - Blue RGB(46, 80, 144), 18pt
+- Subsection Headings: Heading 2 - Green RGB(120, 180, 90), 14pt
+- Minor Headings: Heading 3 - Arial, 12pt
+- Body Text: Arial, 11pt
+- Tables: Light Grid Accent 1 style
 
 #### Valid Section Types
 

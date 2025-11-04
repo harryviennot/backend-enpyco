@@ -1,4 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 import tempfile
@@ -9,6 +10,7 @@ from services.supabase import SupabaseService
 from services.parser import ParserService
 from services.rag import RAGService
 from services.generator import GeneratorService
+from services.exporter import ExporterService
 from models.schemas import (
     MemoireUploadResponse,
     MemoireMetadata,
@@ -59,6 +61,7 @@ supabase_service = SupabaseService()
 parser_service = ParserService(chunk_size=500, chunk_overlap=50)
 rag_service = RAGService()
 generator_service = GeneratorService()
+exporter_service = ExporterService()
 
 # === HEALTH CHECK ===
 
@@ -1250,6 +1253,110 @@ async def delete_project(project_id: str):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to delete project: {str(e)}")
+
+
+@app.get(
+    "/projects/{project_id}/download",
+    summary="Download memoir as Word document",
+    tags=["Projects"],
+    responses={
+        200: {
+            "description": "Word document (.docx)",
+            "content": {
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {}
+            }
+        },
+        404: {"description": "Project not found"},
+        400: {"description": "No sections generated"},
+        500: {"description": "Export failed"}
+    }
+)
+async def download_memoire(project_id: str):
+    """
+    Download the generated memoir as a Word document.
+
+    This endpoint exports all generated sections to a professionally formatted
+    Word document (.docx) with Bernadet styling.
+
+    ## Process
+
+    1. **Fetch sections**: Retrieves all sections from the database (ordered)
+    2. **Convert markdown to Word**: Converts markdown content to Word format
+    3. **Apply styling**: Applies Bernadet brand colors and fonts
+    4. **Generate document**: Creates a complete Word document
+    5. **Return file**: Returns the .docx file for download
+
+    ## Styling
+
+    - **Font**: Arial throughout
+    - **Heading 1**: Blue RGB(46, 80, 144), 18pt
+    - **Heading 2**: Green RGB(120, 180, 90), 14pt
+    - **Body text**: 11pt
+    - **Tables**: Light Grid Accent 1 style
+    - **Lists**: Bullet and numbered lists supported
+
+    ## Requirements
+
+    - Project must exist
+    - At least one section must be generated (use POST /projects/{id}/generate first)
+
+    Args:
+        project_id: UUID of the project
+
+    Returns:
+        FileResponse with the generated Word document
+    """
+    print(f"📥 Download request for project: {project_id}")
+
+    # Check if project exists
+    project = supabase_service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    print(f"   Project: {project['name']}")
+
+    try:
+        # Get sections
+        sections = supabase_service.get_sections(project_id)
+
+        if not sections:
+            raise HTTPException(
+                status_code=400,
+                detail="No sections generated. Please generate sections first using POST /projects/{id}/generate"
+            )
+
+        print(f"   Sections found: {len(sections)}")
+
+        # Create Word document
+        print(f"📝 Creating Word document...")
+        output_path = exporter_service.create_memoire(
+            project_name=project['name'],
+            sections=sections
+        )
+
+        print(f"✅ Document created: {output_path}")
+
+        # Generate filename
+        safe_project_name = project['name'].replace(' ', '_').replace('/', '_')
+        filename = f"memoire_{safe_project_name}.docx"
+
+        # Return file
+        return FileResponse(
+            path=output_path,
+            media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            filename=filename,
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Export failed: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to export memoir: {str(e)}")
 
 
 # === STARTUP EVENT ===
