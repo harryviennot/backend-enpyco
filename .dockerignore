@@ -1,17 +1,75 @@
-node_modules
-npm-debug.log
-.next
-.git
-.gitignore
-README.md
-.env
-.env.local
-.env.*.local
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 .DS_Store
-*.md
-!README.md
-coverage
-.vscode
-.idea
-dist
-build
+
+# Environment files (will use .env from host)
+# .env is needed, so not ignoring it
+
+# Git
+.git/
+.gitignore
+
+# Documentation  
+DATABASE.md
+PRD.md
+
+# Test files
+tests/
+test_*.py
+*_test.py
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Cache
+.cache/
+.pytest_cache/
+
+# Coverage
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# Setup scripts (already run before Docker)
+setup_complete.py
+setup_db.py
+setup_storage.py

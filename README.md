@@ -64,21 +64,49 @@ OPENAI_API_KEY="sk-..."
 
 ## Running the Server
 
-### Development Mode (with auto-reload)
+### Option 1: Docker (Recommended)
 
+**Start all services:**
+```bash
+docker-compose up
+```
+
+**Start in background:**
+```bash
+docker-compose up -d
+```
+
+**View logs:**
+```bash
+docker-compose logs -f backend
+```
+
+**Stop services:**
+```bash
+docker-compose down
+```
+
+**Rebuild after code changes:**
+```bash
+docker-compose up --build
+```
+
+The API will be available at `http://localhost:8000`
+
+### Option 2: Local Development (without Docker)
+
+**Development Mode (with auto-reload):**
 ```bash
 source venv/bin/activate
 python main.py
 ```
 
 Or using uvicorn directly:
-
 ```bash
 uvicorn main:app --reload --port 8000
 ```
 
-### Production Mode
-
+**Production Mode:**
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
@@ -128,6 +156,8 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 - ✅ All dependencies installed and up-to-date
 - ✅ Database schema with vector search capability
 - ✅ PostgreSQL functions for RAG operations
+- ✅ Docker & Docker Compose setup
+- ✅ Redis for caching on port 6380 (optional)
 
 ### Next Steps
 
@@ -174,15 +204,45 @@ The app uses Supabase which provides:
 
 ## Troubleshooting
 
-### Port Already in Use
+### Docker Issues
 
+**Port Already in Use:**
+```bash
+# Stop all containers
+docker-compose down
+
+# Or kill process on port 8000
+lsof -ti:8000 | xargs kill -9
+```
+
+**Container Won't Start:**
+```bash
+# Check logs
+docker-compose logs backend
+
+# Rebuild from scratch
+docker-compose down -v
+docker-compose build --no-cache
+docker-compose up
+```
+
+**Database Connection Issues:**
+```bash
+# Check .env file has correct DATABASE_URL
+# Ensure Supabase project is active
+# Test connection:
+docker-compose exec backend python -c "from config import Config; Config.validate(); print('Config OK')"
+```
+
+### Local Development Issues
+
+**Port Already in Use:**
 ```bash
 # Kill process on port 8000
 lsof -ti:8000 | xargs kill -9
 ```
 
-### Module Not Found
-
+**Module Not Found:**
 ```bash
 # Reinstall dependencies
 pip install -r requirements.txt --upgrade

@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # FastAPI Backend Service
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: memoir-generator-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      # Mount source code for hot-reload during development
+      - .:/app
+      # Exclude venv and cache from being mounted
+      - /app/venv
+      - /app/__pycache__
+      # Persist data directory
+      - ./data:/app/data
+      # Persist templates directory
+      - ./templates:/app/templates
+    networks:
+      - memoir-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      - redis
+
+  # Redis for caching (optional, for future use)
+  redis:
+    image: redis:7-alpine
+    container_name: memoir-generator-redis
+    ports:
+      - "6380:6379"  # Changed to 6380 to avoid conflict with host Redis
+    volumes:
+      - redis-data:/data
+    networks:
+      - memoir-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    command: redis-server --appendonly yes
+
+networks:
+  memoir-network:
+    driver: bridge
+
+volumes:
+  redis-data:
+    driver: local
