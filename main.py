@@ -47,7 +47,7 @@ app.add_middleware(
 
 # Initialize services
 supabase_service = SupabaseService()
-parser_service = ParserService(chunk_size=500, chunk_overlap=100)
+parser_service = ParserService(chunk_size=500, chunk_overlap=50)
 rag_service = RAGService()
 
 # === HEALTH CHECK ===

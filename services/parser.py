@@ -2,7 +2,8 @@
 Parser Service for extracting text from PDF and DOCX files.
 """
 import os
-from typing import List, Dict, Any
+import re
+from typing import List, Dict, Any, Set
 from pypdf import PdfReader
 from docx import Document
 from models.schemas import ParsedSection, ParseResult, ChunkData
@@ -21,6 +22,133 @@ class ParserService:
         """
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
+
+    def clean_text(self, text: str) -> str:
+        """
+        Clean and normalize text by removing noise and excessive whitespace.
+
+        This method:
+        - Removes excessive whitespace (multiple spaces, tabs, newlines)
+        - Normalizes line breaks
+        - Removes common document artifacts (page numbers, etc.)
+        - Preserves meaningful paragraph structure
+
+        Args:
+            text: Raw text to clean
+
+        Returns:
+            Cleaned and normalized text
+        """
+        if not text:
+            return ""
+
+        # Remove form feed and other control characters (except newlines and tabs)
+        text = re.sub(r'[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f]', '', text)
+
+        # Remove excessive whitespace while preserving paragraph breaks
+        # Replace multiple spaces with single space
+        text = re.sub(r' +', ' ', text)
+
+        # Replace tabs with spaces
+        text = text.replace('\t', ' ')
+
+        # Normalize line breaks: replace 3+ newlines with 2 newlines (paragraph break)
+        text = re.sub(r'\n{3,}', '\n\n', text)
+
+        # Remove spaces at the beginning and end of lines
+        text = re.sub(r' *\n *', '\n', text)
+
+        # Remove common page number patterns
+        # Pattern: "Page X", "Page X of Y", "X / Y", "- X -", etc.
+        text = re.sub(r'\n\s*-?\s*\d+\s*-?\s*\n', '\n', text)  # Standalone page numbers
+        text = re.sub(r'\n\s*Page\s+\d+(\s+of\s+\d+)?\s*\n', '\n', text, flags=re.IGNORECASE)
+        text = re.sub(r'\n\s*\d+\s*/\s*\d+\s*\n', '\n', text)  # "X / Y" format
+
+        # Remove common header/footer patterns (often repeated)
+        # Pattern: Short lines at start/end that might be headers/footers
+        lines = text.split('\n')
+        cleaned_lines = []
+
+        for line in lines:
+            stripped = line.strip()
+            # Skip very short lines that are likely artifacts (but keep empty lines for paragraphs)
+            if len(stripped) == 0:
+                cleaned_lines.append('')
+            elif len(stripped) < 3:  # Skip lines with only 1-2 characters (likely artifacts)
+                continue
+            else:
+                cleaned_lines.append(line)
+
+        text = '\n'.join(cleaned_lines)
+
+        # Final cleanup: remove any remaining multiple spaces
+        text = re.sub(r' +', ' ', text)
+
+        # Normalize excessive newlines again after line filtering
+        text = re.sub(r'\n{3,}', '\n\n', text)
+
+        # Strip leading/trailing whitespace
+        text = text.strip()
+
+        return text
+
+    def detect_repeated_patterns(self, text: str, min_length: int = 10, max_length: int = 100) -> Set[str]:
+        """
+        Detect repeated patterns in text (likely headers/footers).
+
+        Looks for strings that appear multiple times and might be headers/footers.
+
+        Args:
+            text: Text to analyze
+            min_length: Minimum length of pattern to detect
+            max_length: Maximum length of pattern to detect
+
+        Returns:
+            Set of repeated patterns found
+        """
+        patterns = set()
+        lines = text.split('\n')
+
+        # Count occurrences of each line
+        line_counts = {}
+        for line in lines:
+            stripped = line.strip()
+            # Only consider lines within length bounds
+            if min_length <= len(stripped) <= max_length:
+                line_counts[stripped] = line_counts.get(stripped, 0) + 1
+
+        # Consider a line a "repeated pattern" if it appears 3+ times
+        # (likely a header/footer if it appears on multiple pages)
+        for line, count in line_counts.items():
+            if count >= 3:
+                patterns.add(line)
+
+        return patterns
+
+    def remove_repeated_patterns(self, text: str) -> str:
+        """
+        Remove repeated patterns (headers/footers) from text.
+
+        Args:
+            text: Text to clean
+
+        Returns:
+            Text with repeated patterns removed
+        """
+        # Detect repeated patterns
+        patterns = self.detect_repeated_patterns(text)
+
+        if not patterns:
+            return text
+
+        # Remove each pattern
+        for pattern in patterns:
+            # Use word boundaries to avoid removing parts of legitimate text
+            text = text.replace(f'\n{pattern}\n', '\n')
+            text = text.replace(f'{pattern}\n', '')
+            text = text.replace(f'\n{pattern}', '')
+
+        return text
 
     def parse_pdf(self, filepath: str) -> ParseResult:
         """
@@ -56,6 +184,10 @@ class ParserService:
 
             # Combine all text
             full_text = '\n\n'.join(section.content for section in sections)
+
+            # Clean the text to remove whitespace, headers, footers, etc.
+            full_text = self.clean_text(full_text)
+            full_text = self.remove_repeated_patterns(full_text)
 
             # Extract metadata
             metadata = {}
@@ -142,6 +274,10 @@ class ParserService:
             # Combine all text
             full_text = '\n\n'.join(section.content for section in sections)
 
+            # Clean the text to remove whitespace, headers, footers, etc.
+            full_text = self.clean_text(full_text)
+            full_text = self.remove_repeated_patterns(full_text)
+
             # Extract metadata from core properties
             metadata = {}
             if doc.core_properties:
@@ -180,6 +316,9 @@ class ParserService:
         """
         if metadata is None:
             metadata = {}
+
+        # Clean text before chunking (if not already cleaned)
+        text = self.clean_text(text)
 
         chunks = []
         text_length = len(text)

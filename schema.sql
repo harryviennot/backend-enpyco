@@ -72,16 +72,18 @@ CREATE INDEX idx_sections_project ON sections(project_id, order_num);
 -- 8. Create vector similarity index (IVFFlat)
 -- =====================================================
 -- This index speeds up vector similarity search
+-- Using lists=10 for better performance on free tier with small-medium datasets
 CREATE INDEX ON document_chunks
 USING ivfflat (embedding vector_cosine_ops)
-WITH (lists = 100);
+WITH (lists = 10);
 
 -- 9. Create match_documents function for RAG
 -- =====================================================
 CREATE OR REPLACE FUNCTION match_documents(
     query_embedding vector(1536),
     match_count int DEFAULT 10,
-    memoire_ids uuid[] DEFAULT NULL
+    memoire_ids uuid[] DEFAULT NULL,
+    min_similarity float DEFAULT 0.0
 )
 RETURNS TABLE (
     id uuid,
@@ -104,6 +106,7 @@ BEGIN
             WHEN memoire_ids IS NOT NULL THEN memoire_id = ANY(memoire_ids)
             ELSE true
         END
+        AND (1 - (document_chunks.embedding <=> query_embedding)) >= min_similarity
     ORDER BY document_chunks.embedding <=> query_embedding
     LIMIT match_count;
 END;

@@ -250,30 +250,26 @@ class RAGService:
             query_embedding = self.generate_embedding(query)
 
             # Call the PostgreSQL function for vector search
-            # Function signature: match_documents(query_embedding, match_count, memoire_ids)
+            # Function signature: match_documents(query_embedding, match_count, memoire_ids, min_similarity)
             # Note: PostgreSQL function expects parameters in specific order
             rpc_params = {
                 'query_embedding': query_embedding,
                 'match_count': n_results,
-                'memoire_ids': memoire_ids if memoire_ids else None
+                'memoire_ids': memoire_ids if memoire_ids else None,
+                'min_similarity': similarity_threshold
             }
 
             if memoire_ids:
                 print(f"🎯 Filtering by memoire IDs: {memoire_ids}")
 
+            if similarity_threshold > 0.0:
+                print(f"🔍 Applying similarity threshold: {similarity_threshold}")
+
             # Execute the search using the match_documents RPC function
+            # Filtering now happens in PostgreSQL for better performance
             result = self.supabase.rpc('match_documents', rpc_params).execute()
 
             search_results = result.data if result.data else []
-
-            # Apply similarity threshold filtering on client side
-            # (PostgreSQL function doesn't support this parameter)
-            if similarity_threshold > 0.0:
-                search_results = [
-                    r for r in search_results
-                    if r.get('similarity', 0.0) >= similarity_threshold
-                ]
-                print(f"🔍 Applied similarity threshold {similarity_threshold}: {len(search_results)} results remain")
 
             print(f"✅ Found {len(search_results)} results")
 
