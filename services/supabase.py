@@ -221,3 +221,60 @@ class SupabaseService:
         """
         result = self.client.table('sections').select('*').eq('project_id', project_id).order('order_num').execute()
         return result.data
+
+    def delete_project(self, project_id: str) -> bool:
+        """
+        Supprime un projet et toutes ses données associées.
+
+        Grâce à ON DELETE CASCADE dans le schema, cela supprimera automatiquement:
+        - Les sections dans sections
+        - Tout document Word généré (si stocké)
+
+        Args:
+            project_id: UUID du projet à supprimer
+
+        Returns:
+            True si la suppression a réussi
+        """
+        # Get project to get storage paths
+        project = self.get_project(project_id)
+        if not project:
+            return False
+
+        # Delete RC file from storage if exists
+        if project.get('rc_storage_path'):
+            try:
+                rc_path = project['rc_storage_path']
+                self.client.storage.from_('memoires').remove([rc_path])
+                print(f"✅ Deleted RC file from storage: {rc_path}")
+            except Exception as e:
+                print(f"⚠️ Warning: Could not delete RC file from storage: {e}")
+                # Continue anyway to delete database record
+
+        # Delete any generated Word documents from storage
+        try:
+            # Check if there's a generated document path (would be in projects/{id}/ folder)
+            doc_path = f"projects/{project_id}/generated_memoir.docx"
+            self.client.storage.from_('memoires').remove([doc_path])
+            print(f"✅ Deleted generated document from storage: {doc_path}")
+        except Exception as e:
+            # It's OK if this fails - document might not exist yet
+            print(f"ℹ️ No generated document to delete (or deletion failed): {e}")
+
+        # Delete all files in the project folder
+        try:
+            project_folder = f"projects/{project_id}/"
+            # List all files in project folder
+            files = self.client.storage.from_('memoires').list(project_folder)
+            if files:
+                file_paths = [f"{project_folder}{f['name']}" for f in files]
+                self.client.storage.from_('memoires').remove(file_paths)
+                print(f"✅ Deleted {len(file_paths)} file(s) from project folder")
+        except Exception as e:
+            print(f"ℹ️ No project folder to clean up: {e}")
+
+        # Delete database record (CASCADE will delete related sections)
+        self.client.table('projects').delete().eq('id', project_id).execute()
+        print(f"✅ Deleted project record and related sections: {project_id}")
+
+        return True

@@ -121,6 +121,27 @@ class SectionData(BaseModel):
     created_at: datetime
 
 
+class SectionResponse(BaseModel):
+    """Response for a generated section (minimal info)."""
+    id: str
+    section_type: str
+    title: str
+
+
+class GenerateRequest(BaseModel):
+    """Request to generate memoir sections."""
+    memoire_ids: List[str] = Field(..., min_items=1, description="List of memoire UUIDs to use as references")
+    sections: List[str] = Field(..., min_items=1, description="List of section types to generate")
+
+
+class GenerateResponse(BaseModel):
+    """Response after generating memoir sections."""
+    project_id: str
+    status: str
+    sections: List[SectionResponse]
+    message: str
+
+
 # === RAG Schemas ===
 
 class IndexResponse(BaseModel):

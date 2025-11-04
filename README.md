@@ -150,13 +150,18 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 - **Swagger UI**: http://localhost:8000/docs
 - **ReDoc**: http://localhost:8000/redoc
 
-### Planned (Future Steps)
+### Generation (Step 5 Complete)
 
 - `POST /projects` - Create new project
+- `GET /projects` - List all projects
+- `GET /projects/{id}` - Get project details
 - `POST /projects/{id}/upload-rc` - Upload RC document
 - `POST /projects/{id}/generate` - Generate memoir sections
+- `GET /projects/{id}/sections` - Get generated sections
+
+### Planned (Future Steps)
+
 - `GET /projects/{id}/download` - Download generated Word document
-- `GET /projects` - List all projects
 
 ## Current Status
 
@@ -215,25 +220,37 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 - ✅ **Vector indexing in pgvector**
 - ✅ **Semantic search with similarity scoring**
 - ✅ **Performance optimizations** (see [OPTIMIZATION_SUMMARY.md](OPTIMIZATION_SUMMARY.md))
+- ✅ **Claude API integration for memoir generation**
+- ✅ **Project management system (create, upload RC, generate)**
+- ✅ **Intelligent section generation with RAG context**
+- ✅ **9 section types with specialized prompts**
+- ✅ **Real-time generation with progress tracking**
+
+✅ **Step 5 Complete**: Generator Service
+
+- Claude API integration (Sonnet 4.5) for memoir generation
+- Section generation with RAG context
+- Intelligent prompt engineering for technical memoirs
+- 9 section types supported (presentation, organisation, methodologie, etc.)
+- Project workflow: create → upload RC → generate sections
+- Real-time generation with progress tracking
+- Error handling with partial generation support
 
 ### Next Steps
 
-1. **Step 5**: Generator Service
+1. **Step 6**: Exporter Service
 
-   - Claude API integration for memoir generation
-   - Section generation with RAG context
-   - Prompt engineering for technical memoirs
-
-2. **Step 6**: Exporter Service
-
-   - Word document generation
-   - Template management
+   - Word document generation from sections
+   - Template management for Bernadet style
+   - Markdown to Word conversion
    - Styling and formatting
+   - Download endpoint for generated memoirs
 
-3. **Step 7**: Projects & RC Processing
-   - Project management endpoints
-   - RC document upload and parsing
-   - Link projects to memoires
+2. **Step 7**: Advanced Features (Optional)
+   - Section regeneration capability
+   - Multiple memoir templates
+   - RC criteria extraction enhancement
+   - Image and annexe support
 
 ## Usage Examples
 
@@ -367,6 +384,101 @@ This deletes:
 - The database record
 - All chunks (via CASCADE)
 - All embeddings (via CASCADE)
+
+### Complete Generation Workflow (Step 5)
+
+Here's a complete example of creating a project and generating memoir sections:
+
+#### 1. Create a Project
+
+```bash
+curl -X POST "http://localhost:8000/projects" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Résidence Personnes Âgées - Toulouse"}'
+```
+
+Response:
+
+```json
+{
+  "id": "4cf0ac0e-dbc9-46e7-bfb9-f8ad64c889e1",
+  "name": "Résidence Personnes Âgées - Toulouse",
+  "status": "draft",
+  "created_at": "2025-11-04T17:45:20Z"
+}
+```
+
+#### 2. Upload RC Document
+
+```bash
+curl -X POST "http://localhost:8000/projects/4cf0ac0e-dbc9-46e7-bfb9-f8ad64c889e1/upload-rc" \
+  -F "file=@rc_toulouse.pdf"
+```
+
+Response:
+
+```json
+{
+  "project_id": "4cf0ac0e-dbc9-46e7-bfb9-f8ad64c889e1",
+  "rc_uploaded": true,
+  "rc_storage_path": "projects/4cf0ac0e-dbc9-46e7-bfb9-f8ad64c889e1/rc.pdf"
+}
+```
+
+#### 3. Generate Memoir Sections
+
+```bash
+curl -X POST "http://localhost:8000/projects/4cf0ac0e-dbc9-46e7-bfb9-f8ad64c889e1/generate" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "memoire_ids": ["550e8400-e29b-41d4-a716-446655440000", "660e8400-e29b-41d4-a716-446655440001"],
+    "sections": ["presentation", "organisation", "methodologie", "moyens_humains", "moyens_materiels"]
+  }'
+```
+
+Response:
+
+```json
+{
+  "project_id": "4cf0ac0e-dbc9-46e7-bfb9-f8ad64c889e1",
+  "status": "ready",
+  "sections": [
+    {
+      "id": "eb22718d-372e-4eb1-91d9-569e2ca87efd",
+      "section_type": "presentation",
+      "title": "Presentation"
+    },
+    {
+      "id": "19176c26-0847-4e28-8e84-59f55f369d74",
+      "section_type": "organisation",
+      "title": "Organisation"
+    }
+  ],
+  "message": "Successfully generated all 5 sections"
+}
+```
+
+**Generation Time:** Typically 30-60 seconds per section (~3-5 minutes for 5 sections)
+
+#### 4. View Generated Sections
+
+```bash
+curl -X GET "http://localhost:8000/projects/4cf0ac0e-dbc9-46e7-bfb9-f8ad64c889e1/sections"
+```
+
+This returns all generated sections with their full markdown content.
+
+#### Valid Section Types
+
+- `presentation` - Company presentation (history, certifications, key figures)
+- `organisation` - Site organization (PIC, logistics, planning)
+- `methodologie` - Implementation methodology (phasing, techniques)
+- `moyens_humains` - Human resources (org chart, staffing)
+- `moyens_materiels` - Material resources (equipment list, capacities)
+- `planning` - Schedule (Gantt, deadlines)
+- `environnement` - Environmental approach (CSR, waste management)
+- `securite` - Safety and health (PPSPS, prevention measures)
+- `insertion` - Social integration (planned integration hours)
 
 ## Development Notes
 

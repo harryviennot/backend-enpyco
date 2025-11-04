@@ -8,6 +8,7 @@ from config import Config
 from services.supabase import SupabaseService
 from services.parser import ParserService
 from services.rag import RAGService
+from services.generator import GeneratorService
 from models.schemas import (
     MemoireUploadResponse,
     MemoireMetadata,
@@ -18,6 +19,14 @@ from models.schemas import (
     SearchResponse,
     SearchResult,
     HealthResponse,
+    ProjectCreate,
+    ProjectResponse,
+    ProjectMetadata,
+    RCUploadResponse,
+    GenerateRequest,
+    GenerateResponse,
+    SectionResponse,
+    SectionData,
 )
 from utils.helpers import (
     validate_file_type,
@@ -49,6 +58,7 @@ app.add_middleware(
 supabase_service = SupabaseService()
 parser_service = ParserService(chunk_size=500, chunk_overlap=50)
 rag_service = RAGService()
+generator_service = GeneratorService()
 
 # === HEALTH CHECK ===
 
@@ -689,6 +699,557 @@ async def search_memoires(search_request: SearchRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+
+# === PROJECT ENDPOINTS ===
+
+@app.post(
+    "/projects",
+    response_model=ProjectResponse,
+    summary="Create a new project",
+    tags=["Projects"],
+    responses={
+        200: {"description": "Project created successfully"},
+        500: {"description": "Failed to create project"}
+    }
+)
+async def create_project(project: ProjectCreate):
+    """
+    Create a new memoir generation project.
+
+    A project represents a single memoir to be generated. After creating a project:
+    1. Upload the RC (Règlement de Consultation) document
+    2. Generate memoir sections using reference memoires
+    3. Download the final Word document
+
+    Args:
+        project: Project creation request with name
+
+    Returns:
+        ProjectResponse with project details
+    """
+    print(f"🚀 Create project request: {project.name}")
+
+    try:
+        # Create project in database
+        project_id = supabase_service.create_project(project.name)
+
+        # Get the created project
+        created_project = supabase_service.get_project(project_id)
+
+        print(f"✅ Project created: {project_id}")
+
+        return ProjectResponse(
+            id=created_project['id'],
+            name=created_project['name'],
+            status=created_project['status'],
+            created_at=created_project['created_at']
+        )
+
+    except Exception as e:
+        print(f"❌ Project creation failed: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to create project: {str(e)}")
+
+
+@app.get(
+    "/projects",
+    summary="List all projects",
+    tags=["Projects"]
+)
+async def list_projects():
+    """
+    List all memoir generation projects.
+
+    Returns:
+        List of projects with their metadata
+    """
+    try:
+        projects = supabase_service.list_projects()
+
+        return {
+            "projects": projects,
+            "count": len(projects)
+        }
+
+    except Exception as e:
+        print(f"❌ Failed to list projects: {type(e).__name__}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to list projects: {str(e)}")
+
+
+@app.get(
+    "/projects/{project_id}",
+    response_model=ProjectMetadata,
+    summary="Get project details",
+    tags=["Projects"],
+    responses={
+        200: {"description": "Project details"},
+        404: {"description": "Project not found"}
+    }
+)
+async def get_project(project_id: str):
+    """
+    Get details of a specific project.
+
+    Args:
+        project_id: UUID of the project
+
+    Returns:
+        ProjectMetadata with project details
+    """
+    project = supabase_service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    return ProjectMetadata(
+        id=project['id'],
+        name=project['name'],
+        rc_storage_path=project.get('rc_storage_path'),
+        rc_context=project.get('rc_context'),
+        status=project['status'],
+        created_at=project['created_at']
+    )
+
+
+@app.post(
+    "/projects/{project_id}/upload-rc",
+    response_model=RCUploadResponse,
+    summary="Upload RC document for a project",
+    tags=["Projects"],
+    responses={
+        200: {"description": "RC uploaded successfully"},
+        404: {"description": "Project not found"},
+        400: {"description": "Invalid file type"},
+        500: {"description": "Upload failed"}
+    }
+)
+async def upload_rc(
+    project_id: str,
+    file: UploadFile = File(...)
+):
+    """
+    Upload the RC (Règlement de Consultation) document for a project.
+
+    The RC will be:
+    1. Stored in Supabase Storage
+    2. Parsed to extract context (first 2000 characters)
+    3. Saved to the project for use in generation
+
+    **Supported formats**: PDF only
+    **Max file size**: 50 MB
+
+    Args:
+        project_id: UUID of the project
+        file: RC document file (PDF)
+
+    Returns:
+        RCUploadResponse with upload confirmation
+    """
+    print(f"📤 Upload RC for project: {project_id}")
+
+    # Check if project exists
+    project = supabase_service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Validate file type (PDF only for RC)
+    if not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="RC must be a PDF file")
+
+    # Read file content
+    file_content = await file.read()
+    file_size_mb = round(len(file_content) / (1024 * 1024), 2)
+
+    print(f"   File: {file.filename} ({file_size_mb} MB)")
+
+    # Validate file size
+    is_valid_size, error_msg = validate_file_size(len(file_content))
+    if not is_valid_size:
+        raise HTTPException(status_code=400, detail=error_msg)
+
+    try:
+        # Generate storage path
+        storage_path = f"projects/{project_id}/rc.pdf"
+
+        # Upload to Supabase Storage
+        print(f"📦 Uploading to storage: {storage_path}")
+        supabase_service.upload_file(
+            bucket="memoires",
+            path=storage_path,
+            file_data=file_content
+        )
+        print(f"✅ Upload to storage successful")
+
+        # Parse RC to extract context
+        print(f"🔄 Parsing RC to extract context...")
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+            tmp_file.write(file_content)
+            tmp_path = tmp_file.name
+
+        try:
+            parse_result = parser_service.parse_file(tmp_path)
+            # Take first 2000 characters as context
+            rc_context = parse_result.full_text[:2000]
+            print(f"✅ RC parsed: {len(parse_result.full_text)} chars, context: {len(rc_context)} chars")
+
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+        # Update project with RC info
+        supabase_service.update_project_rc(
+            project_id=project_id,
+            rc_storage_path=storage_path,
+            rc_context=rc_context
+        )
+
+        print(f"✅ Project updated with RC info")
+
+        return RCUploadResponse(
+            project_id=project_id,
+            rc_uploaded=True,
+            rc_storage_path=storage_path
+        )
+
+    except Exception as e:
+        print(f"❌ RC upload failed: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to upload RC: {str(e)}")
+
+
+@app.post(
+    "/projects/{project_id}/generate",
+    response_model=GenerateResponse,
+    summary="Generate memoir sections",
+    tags=["Projects"],
+    responses={
+        200: {"description": "Memoir generated successfully"},
+        404: {"description": "Project not found"},
+        400: {"description": "RC not uploaded or invalid section types"},
+        500: {"description": "Generation failed"}
+    }
+)
+async def generate_memoire(
+    project_id: str,
+    request: GenerateRequest
+):
+    """
+    Generate memoir sections using Claude API and RAG.
+
+    This is the main generation endpoint. It will:
+    1. Validate the project and RC exist
+    2. For each requested section:
+       - Search for relevant content using RAG
+       - Generate section content using Claude API
+       - Save the section to database
+    3. Update project status to 'ready'
+
+    ## Section Types
+
+    Valid section types:
+    - `presentation`: Company presentation (history, certifications, key figures)
+    - `organisation`: Site organization (PIC, logistics, planning)
+    - `methodologie`: Implementation methodology (phasing, techniques)
+    - `moyens_humains`: Human resources (org chart, staffing)
+    - `moyens_materiels`: Material resources (equipment list, capacities)
+    - `planning`: Schedule (Gantt, deadlines)
+    - `environnement`: Environmental approach (CSR, waste management)
+    - `securite`: Safety and health (PPSPS, prevention measures)
+    - `insertion`: Social integration (planned integration hours)
+
+    ## Generation Time
+
+    - Typical generation time: 30-60 seconds per section
+    - 5 sections: ~3-5 minutes total
+
+    ## Requirements
+
+    - Project must exist
+    - RC must be uploaded (provides context)
+    - Specified memoires must be indexed (for RAG search)
+
+    Args:
+        project_id: UUID of the project
+        request: Generation request with memoire_ids and section types
+
+    Returns:
+        GenerateResponse with list of generated sections
+    """
+    print(f"🚀 Generate request for project: {project_id}")
+    print(f"   Memoire IDs: {request.memoire_ids}")
+    print(f"   Sections: {request.sections}")
+
+    # Validate project exists
+    project = supabase_service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Check if RC is uploaded
+    if not project.get('rc_storage_path'):
+        raise HTTPException(
+            status_code=400,
+            detail="RC not uploaded. Please upload RC document first using POST /projects/{id}/upload-rc"
+        )
+
+    # Validate section types
+    valid_section_types = generator_service.get_valid_section_types()
+    invalid_sections = [s for s in request.sections if s not in valid_section_types]
+    if invalid_sections:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid section types: {invalid_sections}. Valid types: {valid_section_types}"
+        )
+
+    # Validate memoires exist and are indexed
+    for memoire_id in request.memoire_ids:
+        memoire = supabase_service.get_memoire(memoire_id)
+        if not memoire:
+            raise HTTPException(status_code=404, detail=f"Memoire not found: {memoire_id}")
+        if not memoire.get('indexed', False):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Memoire not indexed: {memoire_id}. Please index it first using POST /memoires/{memoire_id}/index"
+            )
+
+    try:
+        # Update status to generating
+        print(f"\n{'='*80}")
+        print(f"🚀 STARTING MEMOIR GENERATION")
+        print(f"{'='*80}")
+        print(f"📋 Project: {project['name']} (ID: {project_id})")
+        print(f"📚 Reference memoires: {len(request.memoire_ids)}")
+        print(f"📄 Sections to generate: {len(request.sections)}")
+        print(f"   Sections: {', '.join(request.sections)}")
+        print(f"{'='*80}\n")
+
+        supabase_service.update_project_status(project_id, 'generating')
+        print(f"✅ Project status updated to 'generating'\n")
+
+        # Get RC context
+        rc_context = project.get('rc_context', '')
+        print(f"📄 RC context loaded: {len(rc_context)} characters\n")
+
+        # Generate each section
+        generated_sections = []
+
+        for i, section_type in enumerate(request.sections, 1):
+            print(f"\n{'='*80}")
+            print(f"📄 SECTION {i}/{len(request.sections)}: {section_type.upper()}")
+            print(f"{'='*80}")
+
+            try:
+                # Build RAG search query
+                search_query = f"{section_type} {generator_service.SECTION_DESCRIPTIONS.get(section_type, '')}"
+
+                print(f"🔍 Step 1/3: Searching for relevant content...")
+                print(f"   Query: '{search_query[:80]}...'")
+
+                # Search for relevant chunks
+                chunks = rag_service.search(
+                    query=search_query,
+                    memoire_ids=request.memoire_ids,
+                    n_results=10,
+                    similarity_threshold=0.5  # Only get relevant chunks
+                )
+
+                print(f"✅ Found {len(chunks)} relevant chunks from reference memoires")
+                if chunks:
+                    avg_similarity = sum(c.get('similarity', 0) for c in chunks) / len(chunks)
+                    print(f"   Average similarity: {avg_similarity:.2f}")
+                print(f"\n🤖 Step 2/3: Generating content with Claude AI...")
+
+                # Generate section with Claude
+                content = generator_service.generate_section(
+                    section_type=section_type,
+                    rc_context=rc_context,
+                    reference_chunks=chunks
+                )
+
+                # Save section to database
+                print(f"\n💾 Step 3/3: Saving section to database...")
+                section_title = section_type.replace('_', ' ').title()
+                section_id = supabase_service.create_section(
+                    project_id=project_id,
+                    section_type=section_type,
+                    title=section_title,
+                    content=content,
+                    order_num=i
+                )
+
+                print(f"✅ Section '{section_type}' saved successfully!")
+                print(f"   Section ID: {section_id}")
+                print(f"   Title: {section_title}")
+                print(f"   Content length: {len(content)} characters")
+
+                generated_sections.append(
+                    SectionResponse(
+                        id=section_id,
+                        section_type=section_type,
+                        title=section_title
+                    )
+                )
+
+            except Exception as section_error:
+                print(f"\n❌ FAILED to generate section '{section_type}'")
+                print(f"   Error: {str(section_error)}")
+                import traceback
+                traceback.print_exc()
+                # Continue with other sections instead of failing completely
+                # In production, you might want to fail fast instead
+
+        # Update project status to ready
+        print(f"\n{'='*80}")
+        print(f"📊 GENERATION SUMMARY")
+        print(f"{'='*80}")
+
+        if len(generated_sections) == len(request.sections):
+            supabase_service.update_project_status(project_id, 'ready')
+            status_msg = "ready"
+            message = f"Successfully generated all {len(generated_sections)} sections"
+            print(f"✅ SUCCESS: All {len(generated_sections)} sections generated!")
+        else:
+            supabase_service.update_project_status(project_id, 'partial')
+            status_msg = "partial"
+            message = f"Generated {len(generated_sections)}/{len(request.sections)} sections (some failed)"
+            print(f"⚠️  PARTIAL SUCCESS: Generated {len(generated_sections)}/{len(request.sections)} sections")
+            failed_count = len(request.sections) - len(generated_sections)
+            print(f"   {failed_count} section(s) failed to generate")
+
+        print(f"\n📋 Generated sections:")
+        for idx, section in enumerate(generated_sections, 1):
+            print(f"   {idx}. {section.title} ({section.section_type})")
+
+        print(f"\n✅ Project status updated to '{status_msg}'")
+        print(f"{'='*80}\n")
+
+        return GenerateResponse(
+            project_id=project_id,
+            status=status_msg,
+            sections=generated_sections,
+            message=message
+        )
+
+    except Exception as e:
+        # Update status to failed
+        supabase_service.update_project_status(project_id, 'failed')
+
+        print(f"❌ Generation failed: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to generate memoir: {str(e)}")
+
+
+@app.get(
+    "/projects/{project_id}/sections",
+    summary="Get project sections",
+    tags=["Projects"],
+    responses={
+        200: {"description": "List of sections"},
+        404: {"description": "Project not found"}
+    }
+)
+async def get_project_sections(project_id: str):
+    """
+    Get all generated sections for a project.
+
+    Args:
+        project_id: UUID of the project
+
+    Returns:
+        List of sections with content
+    """
+    # Check if project exists
+    project = supabase_service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    try:
+        sections = supabase_service.get_sections(project_id)
+
+        return {
+            "project_id": project_id,
+            "project_name": project['name'],
+            "sections": sections,
+            "count": len(sections)
+        }
+
+    except Exception as e:
+        print(f"❌ Failed to get sections: {type(e).__name__}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get sections: {str(e)}")
+
+
+@app.delete(
+    "/projects/{project_id}",
+    summary="Delete a project",
+    tags=["Projects"],
+    responses={
+        200: {"description": "Project deleted successfully"},
+        404: {"description": "Project not found"},
+        500: {"description": "Deletion failed"}
+    }
+)
+async def delete_project(project_id: str):
+    """
+    Delete a project and all its associated data.
+
+    This will delete:
+    - The project record from database
+    - All generated sections (via CASCADE)
+    - RC document from storage
+    - Any generated Word documents from storage
+    - All files in the project folder
+
+    **Warning**: This operation cannot be undone!
+
+    Args:
+        project_id: UUID of the project to delete
+
+    Returns:
+        Success message with deletion details
+    """
+    print(f"🗑️ Delete request for project: {project_id}")
+
+    # Check if project exists
+    project = supabase_service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Get sections count before deletion
+    sections = supabase_service.get_sections(project_id)
+    sections_count = len(sections)
+
+    print(f"📋 Project: {project['name']}")
+    print(f"📄 Sections to delete: {sections_count}")
+    print(f"📁 RC path: {project.get('rc_storage_path', 'None')}")
+
+    try:
+        # Delete project and all associated data
+        success = supabase_service.delete_project(project_id)
+
+        if success:
+            print(f"✅ Successfully deleted project: {project_id}")
+            return {
+                "success": True,
+                "message": f"Project '{project['name']}' and all associated data deleted successfully",
+                "deleted_id": project_id,
+                "deleted_sections": sections_count,
+                "details": {
+                    "project_name": project['name'],
+                    "sections_deleted": sections_count,
+                    "rc_deleted": bool(project.get('rc_storage_path')),
+                    "storage_cleaned": True
+                }
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to delete project")
+
+    except Exception as e:
+        print(f"❌ Delete failed: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to delete project: {str(e)}")
 
 
 # === STARTUP EVENT ===
